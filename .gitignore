@@ -56,3 +56,6 @@ MANIFEST
 
 # Vendored dependencies installed by helper scripts
 external/
+
+# Local ROOT analysis files
+*.root

@@ -1,0 +1,18 @@
+name: coffea-multicell-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy=1.23.5
+  - coffea=0.7.21
+  - hist=2.10.1
+  - boost-histogram=1.7.2
+  - ndcctools
+  - conda-pack
+  - dill
+  - xrootd
+  - git
+  - pyyaml
+  - setuptools=70.3.0
+  - pytest
+  - time
