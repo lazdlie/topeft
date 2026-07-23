@@ -749,6 +749,12 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+    "--use-multicell",
+    action="store_true",
+    help="Use MultiCell storage for HistEFT histograms.",
+    )
+
+    parser.add_argument(
         "--split-lep-flavor",
         action="store_true",
         help="Split up categories by lepton flavor",
@@ -958,6 +964,7 @@ if __name__ == "__main__":
     port = args.port
     wq_filepath = args.wq_filepath
     hist_list = args.hist_list
+    use_multicell = args.use_multicell
     category_groups = args.category_groups
     ttgamma_sample_role_policy = args.ttgamma_sample_role_policy
     analysis_mode = args.analysis_mode
@@ -971,6 +978,10 @@ if __name__ == "__main__":
             ops = yaml.load(f, Loader=yaml.Loader)
         jsonFiles = ops.pop("jsonFiles", jsonFiles)
         prefix = ops.pop("prefix", prefix)
+        use_multicell = ops.pop(
+        "use_multicell",
+        use_multicell,
+        )
         executor_name = ops.pop("executor", executor_name)
         dotest = ops.pop("test", dotest)
         nworkers = ops.pop("nworkers", nworkers)
@@ -1194,17 +1205,21 @@ if __name__ == "__main__":
             # hist_lst.append("tau0Fpt")
             hist_lst.append("ptz_wtau")
     else:
-        # We want to specify a custom list
-        # If we don't specify this argument, it will be None, and the processor will fill all hists
+    # A custom list can be provided.
+    # If hist_list is None, the processor will fill all histograms.
         hist_lst = hist_list
 
-    print("Resolved histogram list: {}".format(", ".join(hist_lst)))
+    if hist_lst is None:
+        print("Resolved histogram list: ALL")
+    else:
+        print("Resolved histogram list: {}".format(", ".join(hist_lst)))
+
     print(
         "Resolved ttgamma sample-role policy: {}".format(
             ttgamma_sample_role_policy
         )
     )
-
+    
     ### Load samples from json
     samplesdict = {}
     sample_sources = {}
@@ -1604,6 +1619,9 @@ if __name__ == "__main__":
     else:
         environment_file = None
 
+
+    print(f"Resolved use_multicell: {use_multicell}")
+    
     processor_instance = analysis_processor.AnalysisProcessor(
         samplesdict,
         wc_lst,
@@ -1625,6 +1643,7 @@ if __name__ == "__main__":
         suppress_forward_eta_stochastic_jer=suppress_forward_eta_stochastic_jer,
         fwd_eta_band_pt_apply=fwd_eta_band_pt_apply,
         ttgamma_sample_role_policy=ttgamma_sample_role_policy,
+        use_multicell=use_multicell,
     )
 
     if executor_name in ["work_queue", "taskvine"]:

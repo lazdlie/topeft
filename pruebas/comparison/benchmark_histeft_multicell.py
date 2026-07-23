@@ -55,7 +55,6 @@ import resource
 import statistics
 import subprocess
 import sys
-import tempfile
 import time
 from itertools import product
 from pathlib import Path
@@ -71,17 +70,52 @@ from topcoffea.modules.histEFT import HistEFT
 # Global configuration
 # ----------------------------------------------------------------------
 
-WC_NAMES = ["ctG", "cQu8"]
+BASE_WC_NAMES = [
+    "ctG", "cQu8", "ctW", "ctZ", "cH",
+    "cHG", "cHW", "cHB", "cHWB", "cQq1",
+]
 
-# Two Wilson coefficients imply six quadratic polynomial terms:
-#
-# 0: SM
-# 1: SM * ctG
-# 2: ctG^2
-# 3: SM * cQu8
-# 4: ctG * cQu8
-# 5: cQu8^2
-N_QUAD_TERMS = 6
+DEFAULT_WILSON_COEFFICIENT_COUNTS = [2, 5, 10, 20, 30]
+
+
+def number_of_eft_coefficients(n_wilson_coefficients):
+    """Return 1 + N + N(N+1)/2 quadratic EFT coefficients."""
+    if n_wilson_coefficients <= 0:
+        raise ValueError("n_wilson_coefficients must be positive")
+    return (
+        1
+        + n_wilson_coefficients
+        + n_wilson_coefficients * (n_wilson_coefficients + 1) // 2
+    )
+
+
+def make_wc_names(n_wilson_coefficients):
+    """Generate deterministic Wilson-coefficient names."""
+    if n_wilson_coefficients <= 0:
+        raise ValueError("n_wilson_coefficients must be positive")
+    names = list(BASE_WC_NAMES[:n_wilson_coefficients])
+    while len(names) < n_wilson_coefficients:
+        names.append(f"wc{len(names)}")
+    return names
+
+
+def make_wc_points(wc_names):
+    """Generate a fixed number of deterministic eval points."""
+    zeros = {name: 0.0 for name in wc_names}
+    first_only = dict(zeros)
+    first_only[wc_names[0]] = 1.0
+    second_only = dict(zeros)
+    if len(wc_names) > 1:
+        second_only[wc_names[1]] = 1.0
+    else:
+        second_only[wc_names[0]] = -1.0
+    all_half = {name: 0.5 for name in wc_names}
+    alternating = {
+        name: (0.75 if index % 2 == 0 else -0.5)
+        for index, name in enumerate(wc_names)
+    }
+    return [{}, zeros, first_only, second_only, all_half, alternating]
+
 
 AVAILABLE_PROCESSES = [
     "ttH",
@@ -111,20 +145,7 @@ N_BINS = 5
 BIN_START = 0.0
 BIN_STOP = 5.0
 
-DEFAULT_EVENT_COUNTS = [
-    10_000,
-    50_000,
-    100_000,
-]
-
-DEFAULT_WC_POINTS = [
-    {},
-    {"ctG": 0.0, "cQu8": 0.0},
-    {"ctG": 1.0, "cQu8": 0.0},
-    {"ctG": 0.0, "cQu8": 1.0},
-    {"ctG": 1.0, "cQu8": 1.0},
-    {"ctG": -0.5, "cQu8": 0.75},
-]
+DEFAULT_EVENT_COUNTS = [10_000]
 
 
 # ----------------------------------------------------------------------
@@ -240,6 +261,7 @@ def generate_test_data(
     processes,
     channels,
     systematics,
+    n_eft_coefficients,
 ):
     """
     Generate a deterministic, balanced multi-category toy dataset.
@@ -300,7 +322,7 @@ def generate_test_data(
     eft_coeff = rng.normal(
         loc=0.0,
         scale=1.0,
-        size=(n_events, N_QUAD_TERMS),
+        size=(n_events, n_eft_coefficients),
     )
 
     # Keep the SM coefficient positive and nonzero.
@@ -357,6 +379,7 @@ def build_histogram(
     processes,
     channels,
     systematics,
+    wc_names,
 ):
     """
     Construct either Standard or MultiCell HistEFT.
@@ -383,7 +406,7 @@ def build_histogram(
             BIN_STOP,
             name="njets",
         ),
-        wc_names=WC_NAMES,
+        wc_names=wc_names,
         use_multicell=use_multicell,
     )
 
@@ -491,6 +514,12 @@ def run_worker_benchmark(args):
     Run one benchmark configuration inside a fresh process.
     """
     use_multicell = args.mode == "multicell"
+    n_wilson_coefficients = args.worker_wilson_coefficients
+    wc_names = make_wc_names(n_wilson_coefficients)
+    n_eft_coefficients = number_of_eft_coefficients(
+        n_wilson_coefficients
+    )
+    wc_points = make_wc_points(wc_names)
 
     (
         processes,
@@ -510,6 +539,7 @@ def run_worker_benchmark(args):
         processes=processes,
         channels=channels,
         systematics=systematics,
+        n_eft_coefficients=n_eft_coefficients,
     )
 
     histogram, build_time = measure_call(
@@ -518,6 +548,7 @@ def run_worker_benchmark(args):
         processes=processes,
         channels=channels,
         systematics=systematics,
+        wc_names=wc_names,
     )
 
     _, fill_time = measure_call(
@@ -543,7 +574,7 @@ def run_worker_benchmark(args):
     # Warm-up evaluation before recording repeated measurements.
     warmup_checksum = evaluate_histogram(
         histogram,
-        DEFAULT_WC_POINTS,
+        wc_points,
     )
 
     eval_timings = []
@@ -553,7 +584,7 @@ def run_worker_benchmark(args):
         checksum, elapsed = measure_call(
             evaluate_histogram,
             histogram,
-            DEFAULT_WC_POINTS,
+            wc_points,
         )
 
         eval_timings.append(elapsed)
@@ -587,7 +618,8 @@ def run_worker_benchmark(args):
         "categories": actual_categories,
         "dense_regular_bins": N_BINS,
         "dense_bins_with_flow": N_BINS + 2,
-        "eft_coefficients": N_QUAD_TERMS,
+        "wilson_coefficients": n_wilson_coefficients,
+        "eft_coefficients": n_eft_coefficients,
         "seed": args.seed,
         "generation_time_s": generation_time,
         "build_time_s": build_time,
@@ -595,6 +627,7 @@ def run_worker_benchmark(args):
         "fill_rate_events_per_s": (
             args.worker_events / fill_time
         ),
+        "eval_points": len(wc_points),
         "eval_repetitions": args.eval_repetitions,
         "eval_time_mean_s": eval_summary["mean"],
         "eval_time_median_s": eval_summary["median"],
@@ -632,6 +665,7 @@ def run_worker_subprocess(
     script_path,
     mode,
     n_events,
+    n_wilson_coefficients,
     args,
 ):
     """
@@ -645,6 +679,8 @@ def run_worker_subprocess(
         mode,
         "--worker-events",
         str(n_events),
+        "--worker-wilson-coefficients",
+        str(n_wilson_coefficients),
         "--processes",
         str(args.processes),
         "--channels",
@@ -668,7 +704,7 @@ def run_worker_subprocess(
     if completed.returncode != 0:
         raise RuntimeError(
             f"Benchmark worker failed for mode={mode}, "
-            f"events={n_events}.\n\n"
+            f"events={n_events}, WCs={n_wilson_coefficients}.\n\n"
             f"STDOUT:\n{completed.stdout}\n\n"
             f"STDERR:\n{completed.stderr}"
         )
@@ -711,6 +747,8 @@ def calculate_relative_metrics(results):
     for result in results:
         key = (
             result["events"],
+            result["wilson_coefficients"],
+            result["eft_coefficients"],
             result["processes"],
             result["channels"],
             result["systematics"],
@@ -747,10 +785,12 @@ def calculate_relative_metrics(results):
 
         comparison = {
             "events": key[0],
-            "processes": key[1],
-            "channels": key[2],
-            "systematics": key[3],
-            "categories": key[4],
+            "wilson_coefficients": key[1],
+            "eft_coefficients": key[2],
+            "processes": key[3],
+            "channels": key[4],
+            "systematics": key[5],
+            "categories": key[6],
         }
 
         for field in ratio_fields:
@@ -802,6 +842,8 @@ def print_results_table(results):
     header = (
         f"{'Mode':<11}"
         f"{'Events':>11}"
+        f"{'WCs':>6}"
+        f"{'EFT':>7}"
         f"{'Cats':>7}"
         f"{'Build':>14}"
         f"{'Fill':>14}"
@@ -819,6 +861,8 @@ def print_results_table(results):
         print(
             f"{result['mode']:<11}"
             f"{result['events']:>11,d}"
+            f"{result['wilson_coefficients']:>6}"
+            f"{result['eft_coefficients']:>7}"
             f"{result['categories']:>7}"
             f"{format_seconds(result['build_time_s']):>14}"
             f"{format_seconds(result['fill_time_s']):>14}"
@@ -841,6 +885,8 @@ def print_comparison_table(comparisons):
 
     print(
         f"{'Events':>11}"
+        f"{'WCs':>6}"
+        f"{'EFT':>7}"
         f"{'Cats':>7}"
         f"{'Fill':>11}"
         f"{'Eval':>11}"
@@ -855,6 +901,8 @@ def print_comparison_table(comparisons):
     for result in comparisons:
         print(
             f"{result['events']:>11,d}"
+            f"{result['wilson_coefficients']:>6}"
+            f"{result['eft_coefficients']:>7}"
             f"{result['categories']:>7}"
             f"{result['fill_time_standard_over_multicell']:>11.3f}"
             f"{result['eval_time_median_standard_over_multicell']:>11.3f}"
@@ -952,6 +1000,19 @@ def parse_arguments():
     )
 
     parser.add_argument(
+        "--wilson-coefficients",
+        "--nwc",
+        dest="wilson_coefficients",
+        type=int,
+        nargs="+",
+        default=DEFAULT_WILSON_COEFFICIENT_COUNTS,
+        help=(
+            "Numbers of Wilson coefficients to benchmark. "
+            "Default: 2 5 10 20 30."
+        ),
+    )
+
+    parser.add_argument(
         "--processes",
         type=int,
         default=3,
@@ -992,7 +1053,7 @@ def parse_arguments():
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("histeft_multicell_benchmark"),
+        default=Path("histeft_multicell_wc_scaling"),
         help=(
             "Output prefix. The program creates .csv, .json, "
             "_ratios.csv, and _ratios.json files."
@@ -1021,6 +1082,12 @@ def parse_arguments():
         help=argparse.SUPPRESS,
     )
 
+    parser.add_argument(
+        "--worker-wilson-coefficients",
+        type=int,
+        help=argparse.SUPPRESS,
+    )
+
     return parser.parse_args()
 
 
@@ -1034,6 +1101,11 @@ def validate_parent_arguments(args):
     ):
         raise ValueError(
             "All event counts must be positive"
+        )
+
+    if any(n_wc <= 0 for n_wc in args.wilson_coefficients):
+        raise ValueError(
+            "All Wilson-coefficient counts must be positive"
         )
 
     if args.eval_repetitions <= 0:
@@ -1079,6 +1151,11 @@ def main():
                 "--worker-events is required in worker mode"
             )
 
+        if args.worker_wilson_coefficients is None:
+            raise ValueError(
+                "--worker-wilson-coefficients is required in worker mode"
+            )
+
         run_worker_benchmark(args)
         return
 
@@ -1103,29 +1180,43 @@ def main():
 
     print(f"Sparse categories:     {category_count}")
     print(f"Event configurations:  {args.events}")
+    print(f"Wilson coefficients:    {args.wilson_coefficients}")
+    print(
+        "EFT coefficients:       "
+        f"{[number_of_eft_coefficients(n) for n in args.wilson_coefficients]}"
+    )
     print(f"Eval repetitions:      {args.eval_repetitions}")
     print("=" * 78)
 
     results = []
 
-    # Alternate order for each event count so one mode is not always
-    # systematically executed first.
-    for configuration_index, n_events in enumerate(args.events):
+    configurations = list(
+        product(
+            args.events,
+            args.wilson_coefficients,
+        )
+    )
+
+    # Alternate mode order so one implementation is not always first.
+    for configuration_index, (
+        n_events,
+        n_wilson_coefficients,
+    ) in enumerate(configurations):
         if configuration_index % 2 == 0:
-            modes = [
-                "standard",
-                "multicell",
-            ]
+            modes = ["standard", "multicell"]
         else:
-            modes = [
-                "multicell",
-                "standard",
-            ]
+            modes = ["multicell", "standard"]
+
+        n_eft_coefficients = number_of_eft_coefficients(
+            n_wilson_coefficients
+        )
 
         for mode in modes:
             print(
                 f"Running mode={mode:<9} "
-                f"events={n_events:>10,d} ...",
+                f"events={n_events:>10,d} "
+                f"WCs={n_wilson_coefficients:>3} "
+                f"EFT={n_eft_coefficients:>4} ...",
                 end="",
                 flush=True,
             )
@@ -1134,6 +1225,7 @@ def main():
                 script_path=script_path,
                 mode=mode,
                 n_events=n_events,
+                n_wilson_coefficients=n_wilson_coefficients,
                 args=args,
             )
 
@@ -1148,6 +1240,7 @@ def main():
     results.sort(
         key=lambda row: (
             row["events"],
+            row["wilson_coefficients"],
             row["mode"],
         )
     )

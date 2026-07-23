@@ -187,11 +187,12 @@ class AnalysisProcessor(processor.ProcessorABC):
 
         return bool(fill_sumw2_hist) and wgt_fluct == "nominal"
 
-    def __init__(self, samples, wc_names_lst=[], hist_lst=None, ecut_threshold=None, fill_sumw2_hist=True, do_systematics=False, split_by_lepton_flavor=False, skip_signal_regions=False, skip_control_regions=False, muonSyst='nominal', dtype=np.float32, rebin=False, offZ_split=False, tau_h_analysis=False, fwd_analysis=False, all_analysis=False, useRun3MVA=True, tau_run_mode="standard", sr_category_dict=None, cr_category_dict=None, suppress_forward_eta_stochastic_jer=False, fwd_eta_band_pt_apply="auto", ttgamma_sample_role_policy="split"):
+    def __init__(self, samples, wc_names_lst=[], hist_lst=None, ecut_threshold=None, fill_sumw2_hist=True, do_systematics=False, split_by_lepton_flavor=False, skip_signal_regions=False, skip_control_regions=False, muonSyst='nominal', dtype=np.float32, rebin=False, offZ_split=False, tau_h_analysis=False, fwd_analysis=False, all_analysis=False, useRun3MVA=True, tau_run_mode="standard", sr_category_dict=None, cr_category_dict=None, suppress_forward_eta_stochastic_jer=False, fwd_eta_band_pt_apply="auto", ttgamma_sample_role_policy="split", use_multicell=False):
 
         self._samples = samples
         self._wc_names_lst = wc_names_lst
         self._dtype = dtype
+        self._use_multicell = bool(use_multicell)
         validated_mode_flags = validate_analysis_mode_flags(
             offZ_split,
             tau_h_analysis,
@@ -309,6 +310,7 @@ class AnalysisProcessor(processor.ProcessorABC):
                     dense_axis,
                     wc_names=wc_names_lst,
                     label=r"Events",
+                    use_multicell=self._use_multicell,
                 )
                 self._hist_axis_map[name] = [dense_axis.name]
                 self._hist_requires_eft[name] = True
@@ -321,6 +323,7 @@ class AnalysisProcessor(processor.ProcessorABC):
                     sumw2_axis,
                     wc_names=wc_names_lst,
                     label=r"Events",
+                    use_multicell=self._use_multicell,
                 )
                 self._hist_axis_map[sumw2_name] = [sumw2_axis.name]
                 self._hist_sumw2_axis_mapping[name] = {sumw2_axis.name: dense_axis.name}
@@ -342,7 +345,7 @@ class AnalysisProcessor(processor.ProcessorABC):
                 axis_names.append(axis.name)
             if build_base_hist:
                 histograms[name] = SparseHist(
-                    proc_axis,
+                    proc_axis, 
                     chan_axis,
                     syst_axis,
                     appl_axis,
