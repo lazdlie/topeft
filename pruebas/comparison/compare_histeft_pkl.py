@@ -706,10 +706,10 @@ def print_global_summary(
         f"{'Histogram':<32}"
         f"{'Status':<10}"
         f"{'Categories':>12}"
-        f"{'Shape':>9}"
-        f"{'Values':>9}"
-        f"{'Max abs':>16}"
-        f"{'Max rel':>16}"
+        f"{'Shape diff':>12}"
+        f"{'Value diff':>12}"
+        f"{'Max abs diff':>16}"
+        f"{'Max rel diff':>16}"
     )
 
     print(header)
@@ -722,8 +722,8 @@ def print_global_summary(
             f"{result.histogram:<32}"
             f"{status:<10}"
             f"{result.compared_categories:>12}"
-            f"{result.shape_mismatches:>9}"
-            f"{result.value_mismatches:>9}"
+            f"{result.shape_mismatches:>12}"
+            f"{result.value_mismatches:>12}"
             f"{result.global_max_abs_diff:>16.6g}"
             f"{result.global_max_rel_diff:>16.6g}"
         )
@@ -737,11 +737,46 @@ def print_global_summary(
     print("Failed:             ", len(failed))
     print("Skipped:            ", len(skipped))
 
+    content_results = [
+        result
+        for result in results
+        if (
+            result.standard_summary is not None
+            and result.multicell_summary is not None
+        )
+    ]
+    nonempty_in_both = sum(
+        not result.standard_summary.all_zeros
+        and not result.multicell_summary.all_zeros
+        for result in content_results
+    )
+    empty_in_both = sum(
+        result.standard_summary.all_zeros
+        and result.multicell_summary.all_zeros
+        for result in content_results
+    )
+    empty_only_in_standard = sum(
+        result.standard_summary.all_zeros
+        and not result.multicell_summary.all_zeros
+        for result in content_results
+    )
+    empty_only_in_multicell = sum(
+        not result.standard_summary.all_zeros
+        and result.multicell_summary.all_zeros
+        for result in content_results
+    )
+
     if skipped:
         print("\nSkipped objects:")
 
         for name, reason in skipped:
             print(f"  - {name}: {reason}")
+
+    print("\nContent summary")
+    print("Non-empty in both:       ", nonempty_in_both)
+    print("Empty in both:           ", empty_in_both)
+    print("Empty only in Standard:  ", empty_only_in_standard)
+    print("Empty only in MultiCell: ", empty_only_in_multicell)
 
     print("=" * 110)
 

@@ -749,9 +749,9 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-    "--use-multicell",
-    action="store_true",
-    help="Use MultiCell storage for HistEFT histograms.",
+        "--use-legacy-histeft",
+        action="store_true",
+        help="Use the legacy HistEFT backend instead of MultiCell storage.",
     )
 
     parser.add_argument(
@@ -964,7 +964,7 @@ if __name__ == "__main__":
     port = args.port
     wq_filepath = args.wq_filepath
     hist_list = args.hist_list
-    use_multicell = args.use_multicell
+    use_legacy_histeft = args.use_legacy_histeft
     category_groups = args.category_groups
     ttgamma_sample_role_policy = args.ttgamma_sample_role_policy
     analysis_mode = args.analysis_mode
@@ -978,9 +978,9 @@ if __name__ == "__main__":
             ops = yaml.load(f, Loader=yaml.Loader)
         jsonFiles = ops.pop("jsonFiles", jsonFiles)
         prefix = ops.pop("prefix", prefix)
-        use_multicell = ops.pop(
-        "use_multicell",
-        use_multicell,
+        use_legacy_histeft = ops.pop(
+            "use_legacy_histeft",
+            use_legacy_histeft,
         )
         executor_name = ops.pop("executor", executor_name)
         dotest = ops.pop("test", dotest)
@@ -1028,6 +1028,8 @@ if __name__ == "__main__":
         env_file_override = ops.pop("env_file", env_file_override)
         use_remote_env = ops.pop("use_remote_env", use_remote_env)
         skip_topcoffea_data_check = ops.pop("skip_topcoffea_data_check", skip_topcoffea_data_check)
+
+    use_multicell = not use_legacy_histeft
 
     try:
         validated_mode_flags = analysis_processor.validate_analysis_mode_flags(
@@ -1620,7 +1622,7 @@ if __name__ == "__main__":
         environment_file = None
 
 
-    print(f"Resolved use_multicell: {use_multicell}")
+    print(f"HistEFT backend: {'MultiCell' if use_multicell else 'legacy'}")
     
     processor_instance = analysis_processor.AnalysisProcessor(
         samplesdict,
