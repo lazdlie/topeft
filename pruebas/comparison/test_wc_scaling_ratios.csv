@@ -1,0 +1,3 @@
+build_time_standard_over_multicell,categories,channels,eft_coefficients,eval_time_median_standard_over_multicell,events,fill_time_standard_over_multicell,gzip_size_standard_over_multicell,peak_rss_standard_over_multicell,pickle_size_standard_over_multicell,pickle_time_standard_over_multicell,processes,raw_storage_standard_over_multicell,systematics,wilson_coefficients
+6.610080383359802,27,3,6,1.012228450375026,1000,1.3888362620370995,1.0051840331778124,0.9970869746150645,1.2574102964118565,0.9438098981264443,3,1.3333333333333333,3,2
+0.9440922895955265,27,3,21,0.9728063844958771,1000,1.3960264102765636,1.0028499050031665,1.0066865819493245,1.0929132528085141,0.9879895334106588,3,1.0952380952380953,3,5

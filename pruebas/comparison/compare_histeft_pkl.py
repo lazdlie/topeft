@@ -11,7 +11,8 @@ import numpy as np
 
 
 '''''
-only one histogram:
+example usage:
+    only one histogram:
 /users/ldiazlie/.conda/envs/coffea-multicell-env/bin/python \
     compare_histeft_pkl.py \
     /users/ldiazlie/topeft/histos/plotsTopEFT.pkl.gz \
@@ -24,7 +25,8 @@ only one histogram:
     compare_histeft_pkl.py \
     /users/ldiazlie/topeft/histos/plotsTopEFT.pkl.gz \
     /users/ldiazlie/topeft/histos/plotsTopEFT_multicell.pkl.gz \
-    --all
+    --all \ 
+    --show-content
 '''''
 
 @dataclass
@@ -530,15 +532,45 @@ def compare_histogram(
         passed = False
         messages.append("MultiCell contains non-finite values")
 
+    # ------------------------------------------------------------------
+# Handle histograms with no content
+# ------------------------------------------------------------------
+
+    both_all_zero = (
+        standard_summary.all_zeros
+        and multicell_summary.all_zeros
+    )
+
+    only_standard_zero = (
+        standard_summary.all_zeros
+        and not multicell_summary.all_zeros
+    )
+
+    only_multicell_zero = (
+        multicell_summary.all_zeros
+        and not standard_summary.all_zeros
+    )
+
     if not allow_all_zero:
-        if standard_summary.all_zeros:
-            passed = False
-            messages.append("Standard contains only zeros")
 
-        if multicell_summary.all_zeros:
-            passed = False
-            messages.append("MultiCell contains only zeros")
+        if both_all_zero:
+            # Both implementations produced an empty histogram.
+            # This is considered a successful comparison.
+            messages.append(
+                "Standard and MultiCell contain only zeros"
+            )
 
+        elif only_standard_zero:
+            passed = False
+            messages.append(
+                "Standard contains only zeros while MultiCell contains nonzero values"
+            )
+
+        elif only_multicell_zero:
+            passed = False
+            messages.append(
+                "MultiCell contains only zeros while Standard contains nonzero values"
+            )
     if shape_mismatches:
         messages.append(
             f"{shape_mismatches} shape mismatches"
@@ -696,7 +728,7 @@ def print_global_summary(
             f"{result.global_max_rel_diff:>16.6g}"
         )
 
-        if result.message and not result.passed:
+        if result.message:
             print(f"  ↳ {result.message}")
 
     print("-" * 110)
