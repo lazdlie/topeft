@@ -144,10 +144,16 @@ def load_category_config(category_config_path=None):
 class AnalysisProcessor(processor.ProcessorABC):
 
     @staticmethod
-    def _resolve_histogram_names(hist_lst, *, ordered_base_hist_names, fill_sumw2_hist):
+    def _resolve_histogram_names(
+        hist_lst,
+        *,
+        ordered_base_hist_names,
+        sumw2_companion_base_hist_names,
+    ):
         """Return ordered collections of requested base and expanded histogram names."""
 
         available_base_hist_names = set(ordered_base_hist_names)
+        sumw2_companion_base_hist_names = set(sumw2_companion_base_hist_names)
         sumw2_suffix = "_sumw2"
 
         if hist_lst is None:
@@ -173,7 +179,7 @@ class AnalysisProcessor(processor.ProcessorABC):
             if base_name not in expanded_seen:
                 expanded_hist_names_ordered.append(base_name)
                 expanded_seen.add(base_name)
-            if fill_sumw2_hist:
+            if base_name in sumw2_companion_base_hist_names:
                 sumw2_name = f"{base_name}{sumw2_suffix}"
                 if sumw2_name not in expanded_seen:
                     expanded_hist_names_ordered.append(sumw2_name)
@@ -245,19 +251,28 @@ class AnalysisProcessor(processor.ProcessorABC):
         )
         # self._tau_wp_checked = False
 
-        self._fill_sumw2_hist = bool(fill_sumw2_hist)  # Whether to fill the w**2 companion histograms
+        self._fill_sumw2_hist = bool(fill_sumw2_hist)  # Whether to fill statistical sumw2 contributions
+        self._use_embedded_sumw2 = self._use_multicell
+        self._build_legacy_sumw2_companions = (
+            not self._use_multicell and self._fill_sumw2_hist
+        )
         self._hist_axis_map = {}
         self._hist_sumw2_axis_mapping = {}
         self._hist_requires_eft = {}
 
         ordered_base_hist_names = list(axes_info.keys()) + list(axes_info_2d.keys())
+        sumw2_companion_base_hist_names = set()
+        if self._fill_sumw2_hist:
+            sumw2_companion_base_hist_names.update(axes_info_2d.keys())
+        if self._build_legacy_sumw2_companions:
+            sumw2_companion_base_hist_names.update(axes_info.keys())
         (
             base_hist_names_ordered,
             expanded_hist_names_ordered,
         ) = self._resolve_histogram_names(
             hist_lst,
             ordered_base_hist_names=ordered_base_hist_names,
-            fill_sumw2_hist=self._fill_sumw2_hist,
+            sumw2_companion_base_hist_names=sumw2_companion_base_hist_names,
         )
 
         self._base_hist_name_set = set(base_hist_names_ordered)
@@ -281,7 +296,7 @@ class AnalysisProcessor(processor.ProcessorABC):
         for name, info in axes_info.items():
             sumw2_name = f"{name}{sumw2_suffix}"
             build_base_hist = name in self._expanded_hist_name_set
-            build_sumw2_hist = self._fill_sumw2_hist and (
+            build_sumw2_hist = self._build_legacy_sumw2_companions and (
                 sumw2_name in self._expanded_hist_name_set
             )
             if not (build_base_hist or build_sumw2_hist):
@@ -311,10 +326,11 @@ class AnalysisProcessor(processor.ProcessorABC):
                     wc_names=wc_names_lst,
                     label=r"Events",
                     use_multicell=self._use_multicell,
+                    store_sumw2=self._use_embedded_sumw2,
                 )
                 self._hist_axis_map[name] = [dense_axis.name]
                 self._hist_requires_eft[name] = True
-            if self._fill_sumw2_hist and build_sumw2_hist:
+            if build_sumw2_hist:
                 histograms[sumw2_name] = HistEFT(
                     proc_axis,
                     chan_axis,
@@ -323,7 +339,8 @@ class AnalysisProcessor(processor.ProcessorABC):
                     sumw2_axis,
                     wc_names=wc_names_lst,
                     label=r"Events",
-                    use_multicell=self._use_multicell,
+                    use_multicell=False,
+                    store_sumw2=False,
                 )
                 self._hist_axis_map[sumw2_name] = [sumw2_axis.name]
                 self._hist_sumw2_axis_mapping[name] = {sumw2_axis.name: dense_axis.name}
@@ -1983,6 +2000,11 @@ class AnalysisProcessor(processor.ProcessorABC):
                                             }
                                             if self._hist_requires_eft.get(dense_axis_name, False):
                                                 axes_fill_info_dict["eft_coeff"] = eft_coeffs_cut
+                                                if self._use_embedded_sumw2:
+                                                    axes_fill_info_dict["fill_sumw2"] = self._should_fill_sumw2_histogram(
+                                                        self._fill_sumw2_hist,
+                                                        wgt_fluct=wgt_fluct,
+                                                    )
                                             hout[dense_axis_name].fill(**axes_fill_info_dict)
                                                                                     
                                         if fill_nominal_sumw2_hist:
