@@ -59,3 +59,9 @@ external/
 
 # Local ROOT analysis files
 *.root
+
+# Generated TopEFT histogram outputs
+histos/plotsTopEFT_*.pkl.gz
+
+# Generated histogram outputs
+histos/plotsTopEFT_*.pkl.gz
