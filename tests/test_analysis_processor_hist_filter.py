@@ -1,3 +1,4 @@
+import hist
 import numpy as np
 import pytest
 
@@ -32,8 +33,8 @@ def _expected_keys(base_names, *, use_multicell, fill_sumw2_hist):
     if not fill_sumw2_hist:
         return expected
 
-    for name in base_names:
-        if name in axes_info_2d or not use_multicell:
+    if not use_multicell:
+        for name in base_names:
             expected.add(f"{name}_sumw2")
     return expected
 
@@ -102,15 +103,24 @@ def test_one_and_two_dimensional_histogram_construction(
     assert not isinstance(two_dimensional, HistEFT)
     assert not hasattr(two_dimensional, "store_sumw2")
     assert not hasattr(two_dimensional, "nominal_sumw2")
+    two_dimensional_storage = two_dimensional._init_args["storage"]
+    if use_multicell:
+        assert isinstance(two_dimensional_storage, hist.storage.Weight)
+    else:
+        assert two_dimensional_storage == "Double"
     assert (
         f"{TWO_DIMENSIONAL_HIST}_sumw2" in processor.accumulator
-    ) is fill_sumw2_hist
+    ) is (fill_sumw2_hist and not use_multicell)
+    if fill_sumw2_hist and not use_multicell:
+        two_dimensional_sumw2 = processor.accumulator[
+            f"{TWO_DIMENSIONAL_HIST}_sumw2"
+        ]
+        assert two_dimensional_sumw2._init_args["storage"] == "Double"
 
     expected_mapping_keys = set()
-    if fill_sumw2_hist:
+    if fill_sumw2_hist and not use_multicell:
         expected_mapping_keys.add(TWO_DIMENSIONAL_HIST)
-        if not use_multicell:
-            expected_mapping_keys.add(ONE_DIMENSIONAL_HIST)
+        expected_mapping_keys.add(ONE_DIMENSIONAL_HIST)
     assert set(processor._hist_sumw2_axis_mapping) == expected_mapping_keys
     assert set(processor._hist_sumw2_axis_mapping) <= set(
         processor._base_hist_name_set
@@ -139,7 +149,7 @@ def test_one_and_two_dimensional_histogram_construction(
             [f"{TWO_DIMENSIONAL_HIST}_sumw2"],
             True,
             True,
-            {TWO_DIMENSIONAL_HIST, f"{TWO_DIMENSIONAL_HIST}_sumw2"},
+            {TWO_DIMENSIONAL_HIST},
         ),
         ([TWO_DIMENSIONAL_HIST], True, False, {TWO_DIMENSIONAL_HIST}),
     ],
@@ -189,6 +199,48 @@ def test_sumw2_fill_gate_only_allows_nominal_path(
             wgt_fluct=wgt_fluct,
         )
         is expected
+    )
+
+
+def test_multicell_two_dimensional_histogram_uses_weight_storage():
+    processor = _make_processor(
+        hist_lst=[TWO_DIMENSIONAL_HIST],
+        fill_sumw2_hist=True,
+        use_multicell=True,
+    )
+    histogram = processor.accumulator[TWO_DIMENSIONAL_HIST]
+    axis_names = processor._hist_axis_map[TWO_DIMENSIONAL_HIST]
+    weights = np.array([2.0, -3.0])
+
+    histogram.fill(
+        process="ttH",
+        channel="2lss",
+        systematic="nominal",
+        appl="isSR",
+        **{
+            axis_names[0]: np.array([10.0, 10.0]),
+            axis_names[1]: np.array([0.1, 0.1]),
+        },
+        weight=weights,
+    )
+
+    dense_histogram = next(iter(histogram._dense_hists.values()))
+    assert isinstance(histogram._init_args["storage"], hist.storage.Weight)
+    assert np.sum(dense_histogram.values()) == pytest.approx(np.sum(weights))
+    assert np.sum(dense_histogram.variances()) == pytest.approx(
+        np.sum(np.square(weights))
+    )
+    assert f"{TWO_DIMENSIONAL_HIST}_sumw2" not in processor.accumulator
+    assert TWO_DIMENSIONAL_HIST not in processor._hist_sumw2_axis_mapping
+
+    restored = cloudpickle.loads(cloudpickle.dumps(histogram))
+    restored_dense_histogram = next(iter(restored._dense_hists.values()))
+    assert isinstance(restored._init_args["storage"], hist.storage.Weight)
+    np.testing.assert_array_equal(
+        restored_dense_histogram.values(), dense_histogram.values()
+    )
+    np.testing.assert_array_equal(
+        restored_dense_histogram.variances(), dense_histogram.variances()
     )
 
 

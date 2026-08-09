@@ -262,10 +262,9 @@ class AnalysisProcessor(processor.ProcessorABC):
 
         ordered_base_hist_names = list(axes_info.keys()) + list(axes_info_2d.keys())
         sumw2_companion_base_hist_names = set()
-        if self._fill_sumw2_hist:
-            sumw2_companion_base_hist_names.update(axes_info_2d.keys())
         if self._build_legacy_sumw2_companions:
             sumw2_companion_base_hist_names.update(axes_info.keys())
+            sumw2_companion_base_hist_names.update(axes_info_2d.keys())
         (
             base_hist_names_ordered,
             expanded_hist_names_ordered,
@@ -348,7 +347,7 @@ class AnalysisProcessor(processor.ProcessorABC):
         for name, axes_cfg in axes_info_2d.items():
             sumw2_name = f"{name}{sumw2_suffix}"
             build_base_hist = name in self._expanded_hist_name_set
-            build_sumw2_hist = self._fill_sumw2_hist and (
+            build_sumw2_hist = self._build_legacy_sumw2_companions and (
                 sumw2_name in self._expanded_hist_name_set
             )
             if not (build_base_hist or build_sumw2_hist):
@@ -367,7 +366,11 @@ class AnalysisProcessor(processor.ProcessorABC):
                     syst_axis,
                     appl_axis,
                     *dense_axes,
-                    storage="Double",
+                    storage=(
+                        hist.storage.Weight()
+                        if self._use_multicell
+                        else "Double"
+                    ),
                 )
                 self._hist_axis_map[name] = axis_names
                 self._hist_requires_eft[name] = False
@@ -383,7 +386,7 @@ class AnalysisProcessor(processor.ProcessorABC):
                 sumw2_axes.append(sumw2_axis)
                 sumw2_axis_names.append(sumw2_axis.name)
                 sumw2_axis_mapping[sumw2_axis.name] = base_axis_name
-            if self._fill_sumw2_hist and build_sumw2_hist:
+            if build_sumw2_hist:
                 histograms[sumw2_name] = SparseHist(
                     proc_axis,
                     chan_axis,
@@ -1686,26 +1689,26 @@ class AnalysisProcessor(processor.ProcessorABC):
             # varnames["b0m_genpFlav"] = b0m_genpFlav
             # varnames["b1m_genhFlav"] = b1m_genhFlav
             # varnames["b1m_genpFlav"] = b1m_genpFlav
-            # varnames["lepton_pt_vs_eta"] = {
-            #     "lepton_pt_vs_eta_pt": lepton0_pt_raw,
-            #     "lepton_pt_vs_eta_abseta": lepton0_abseta,
-            # }
-            # varnames["l0_SeedEtaOrX_vs_SeedPhiOrY"] = {
-            #     "l0_SeedEtaOrX_vs_SeedPhiOrY_SeedEtaOrX": l0_seed_etaorx,
-            #     "l0_SeedEtaOrX_vs_SeedPhiOrY_SeedPhiOrY": l0_seed_phiory,
-            # }
-            # varnames["l0_eta_vs_phi"] = {
-            #     "l0_eta_vs_phi_eta": l0.eta,
-            #     "l0_eta_vs_phi_phi": l0.phi,
-            # }
-            # varnames["l1_SeedEtaOrX_vs_SeedPhiOrY"] = {
-            #     "l1_SeedEtaOrX_vs_SeedPhiOrY_SeedEtaOrX": l1_seed_etaorx,
-            #     "l1_SeedEtaOrX_vs_SeedPhiOrY_SeedPhiOrY": l1_seed_phiory,
-            # }
-            # varnames["l1_eta_vs_phi"] = {
-            #     "l1_eta_vs_phi_eta": l1.eta,
-            #     "l1_eta_vs_phi_phi": l1.phi,
-            # }
+            varnames["lepton_pt_vs_eta"] = {
+                "lepton_pt_vs_eta_pt": lepton0_pt_raw,
+                "lepton_pt_vs_eta_abseta": lepton0_abseta,
+            }
+            varnames["l0_SeedEtaOrX_vs_SeedPhiOrY"] = {
+                "l0_SeedEtaOrX_vs_SeedPhiOrY_SeedEtaOrX": l0_seed_etaorx,
+                "l0_SeedEtaOrX_vs_SeedPhiOrY_SeedPhiOrY": l0_seed_phiory,
+            }
+            varnames["l0_eta_vs_phi"] = {
+                "l0_eta_vs_phi_eta": l0.eta,
+                "l0_eta_vs_phi_phi": l0.phi,
+            }
+            varnames["l1_SeedEtaOrX_vs_SeedPhiOrY"] = {
+                "l1_SeedEtaOrX_vs_SeedPhiOrY_SeedEtaOrX": l1_seed_etaorx,
+                "l1_SeedEtaOrX_vs_SeedPhiOrY_SeedPhiOrY": l1_seed_phiory,
+            }
+            varnames["l1_eta_vs_phi"] = {
+                "l1_eta_vs_phi_eta": l1.eta,
+                "l1_eta_vs_phi_phi": l1.phi,
+            }
 
             if self.enable_tau_blocks:
                 varnames["ptz_wtau"] = ptz_wtau
