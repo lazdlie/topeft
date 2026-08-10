@@ -12,14 +12,14 @@ import coffea.processor as processor
 import pytest
 
 from analysis.topeft_run2.analysis_processor import ANALYSIS_MODE_EXCLUSIVE_ERROR
+from topcoffea.modules.histEFT import HistEFT
 
 _SAMPLE_JSON = Path("input_samples/sample_jsons/test_samples/UL17_private_ttH_for_CI.json")
 _SCRIPT_PATH = Path("analysis/topeft_run2/run_analysis.py")
 _EXPECTED_CR_BASE_HISTS = {
+    "ptz",
     "met",
-    "l0conept",
-    "l0eta",
-    "njets",
+    "lt",
 }
 
 
@@ -111,54 +111,78 @@ def _run_run_analysis(monkeypatch, tmp_path, extra_cli_args, outname):
         return cloudpickle.load(fin)
 
 
-def test_hist_list_cr_includes_sumw2(monkeypatch, tmp_path):
-    output = _run_run_analysis(monkeypatch, tmp_path, ["--hist-list", "cr"], "with-sumw2")
+@pytest.mark.parametrize("use_legacy_histeft", [False, True])
+@pytest.mark.parametrize("no_sumw2", [False, True])
+def test_hist_list_cr_backend_and_sumw2_modes(
+    monkeypatch,
+    tmp_path,
+    use_legacy_histeft,
+    no_sumw2,
+):
+    extra_cli_args = ["--hist-list", "cr"]
+    if use_legacy_histeft:
+        extra_cli_args.append("--use-legacy-histeft")
+    if no_sumw2:
+        extra_cli_args.append("--no-sumw2")
 
-    expected_output_keys = set()
-    for hist_name in _EXPECTED_CR_BASE_HISTS:
-        expected_output_keys.add(hist_name)
-        expected_output_keys.add(f"{hist_name}_sumw2")
-        assert hist_name in output
-        assert f"{hist_name}_sumw2" in output
+    output = _run_run_analysis(
+        monkeypatch,
+        tmp_path,
+        extra_cli_args,
+        f"cr-legacy-{use_legacy_histeft}-no-sumw2-{no_sumw2}",
+    )
+
+    expect_companions = use_legacy_histeft and not no_sumw2
+    expected_output_keys = set(_EXPECTED_CR_BASE_HISTS)
+    if expect_companions:
+        expected_output_keys.update(
+            f"{hist_name}_sumw2" for hist_name in _EXPECTED_CR_BASE_HISTS
+        )
 
     assert set(output) == expected_output_keys
-
-
-def test_hist_list_cr_respects_no_sumw2(monkeypatch, tmp_path):
-    output = _run_run_analysis(
-        monkeypatch,
-        tmp_path,
-        ["--hist-list", "cr", "--no-sumw2"],
-        "without-sumw2",
-    )
-
     for hist_name in _EXPECTED_CR_BASE_HISTS:
-        assert hist_name in output
-        assert f"{hist_name}_sumw2" not in output
+        histogram = output[hist_name]
+        assert isinstance(histogram, HistEFT)
+        assert histogram._use_multicell is (not use_legacy_histeft)
+        assert histogram.store_sumw2 is (not use_legacy_histeft)
+        assert ("quadratic_term" in histogram.axes.name) is use_legacy_histeft
+        if not use_legacy_histeft:
+            assert histogram._cell_count == histogram._quad_count + 1
+            assert histogram._sumw2_index == histogram._quad_count
+            assert set(histogram.nominal_sumw2(flow=True)) == set()
+        assert (f"{hist_name}_sumw2" in output) is expect_companions
 
-    assert set(output) == _EXPECTED_CR_BASE_HISTS
 
-
-def test_custom_hist_list_accepts_fwd0eta(monkeypatch, tmp_path):
+@pytest.mark.parametrize("hist_name", ["fwd0eta", "fwd0pt"])
+def test_custom_hist_list_uses_default_multicell_backend(
+    monkeypatch,
+    tmp_path,
+    hist_name,
+):
     output = _run_run_analysis(
         monkeypatch,
         tmp_path,
-        ["--hist-list", "fwd0eta"],
-        "custom-fwd0eta",
+        ["--hist-list", hist_name],
+        f"custom-{hist_name}",
     )
 
-    assert set(output) == {"fwd0eta", "fwd0eta_sumw2"}
+    assert set(output) == {hist_name}
+    histogram = output[hist_name]
+    assert histogram._use_multicell is True
+    assert histogram.store_sumw2 is True
+    assert "quadratic_term" not in histogram.axes.name
 
 
-def test_custom_hist_list_accepts_fwd0pt(monkeypatch, tmp_path):
+def test_custom_sumw2_name_normalizes_to_multicell_base(monkeypatch, tmp_path):
     output = _run_run_analysis(
         monkeypatch,
         tmp_path,
-        ["--hist-list", "fwd0pt"],
-        "custom-fwd0pt",
+        ["--hist-list", "njets_sumw2"],
+        "custom-njets-sumw2",
     )
 
-    assert set(output) == {"fwd0pt", "fwd0pt_sumw2"}
+    assert set(output) == {"njets"}
+    assert output["njets"].store_sumw2 is True
 
 
 def test_np_postprocess_defer_creates_metadata(tmp_path):

@@ -322,25 +322,14 @@ def calculate_expected_evaluation(coefficients, wc_point):
 
 def extract_all_raw_coefficients(histogram):
     """
-    Convert Standard and MultiCell storage to the common logical layout:
+    Extract Standard and MultiCell coefficients in the common public layout:
 
         (dense bins including flow, EFT coefficients)
     """
-    raw = histogram.view(
-        flow=True,
-        as_dict=True,
-    )
-
     output = {}
 
-    for sparse_key, raw_values in raw.items():
-        values = np.asarray(raw_values)
-
-        if histogram._use_multicell:
-            coefficients = values.T
-        else:
-            coefficients = values[:, 1:-1]
-
+    for sparse_key, values in histogram.yield_coefficients(flow=True).items():
+        coefficients = np.asarray(values)
         assert coefficients.shape == EXPECTED_COEFFICIENT_SHAPE
 
         category = normalize_sparse_key(sparse_key)
