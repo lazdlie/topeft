@@ -33,6 +33,10 @@ import analysis_processor
 from analysis.topeft_run2.analysis_processor import (
     ANALYSIS_MODE_EXCLUSIVE_ERROR,
 )
+from analysis.topeft_run2.benchmark.benchmark_run_analysis import (
+    RunAnalysisBenchmark,
+    capture_executor_metrics_best_effort,
+)
 
 LST_OF_KNOWN_EXECUTORS = ["futures", "work_queue", "taskvine"]
 
@@ -931,6 +935,23 @@ if __name__ == "__main__":
     if args.debug_year_scan:
         _debug_year_scan_selfcheck()
         raise SystemExit(0)
+    try:
+        # Completed runs finalize explicitly below.  Disabling the atexit hook
+        # prevents failed or interrupted analyses from creating partial rows.
+        benchmark = RunAnalysisBenchmark(auto_finalize=False)
+    except Exception:
+        benchmark = None
+
+    def _record_benchmark(method_name, *method_args, **method_kwargs):
+        """Keep every diagnostic hook best-effort and outside physics flow."""
+
+        if benchmark is None:
+            return None
+        try:
+            method = getattr(benchmark, method_name)
+            return method(*method_args, **method_kwargs)
+        except Exception:
+            return None
     if args.workers is not None:
         args.nworkers = args.workers
     jsonFiles = args.jsonFiles
@@ -1517,6 +1538,22 @@ if __name__ == "__main__":
         }
     )
 
+    _record_benchmark(
+        "configure",
+        campaign=os.environ.get(
+            "TOPEFT_BENCHMARK_CAMPAIGN", ",".join(sample_years_from_inputs)
+        ),
+        experiment=os.environ.get("TOPEFT_BENCHMARK_EXPERIMENT", outname),
+        repeat=os.environ.get("TOPEFT_BENCHMARK_REPEAT", ""),
+        backend="MultiCell" if use_multicell else "Legacy",
+        input_json=",".join(map(str, resolved_input_jsons)),
+        executor=executor_name,
+        hist_list="ALL" if hist_lst is None else ",".join(map(str, hist_lst)),
+        n_root_files=sum(len(files) for files in flist.values()),
+        n_events=nevts_total,
+        n_samples=len(flist),
+    )
+
     def _build_np_metadata_payload():
         resolved_year_list = (
             sorted(requested_years) if requested_years is not None else sample_years_from_inputs
@@ -1583,6 +1620,7 @@ if __name__ == "__main__":
         if do_np and np_postprocess_mode == "defer":
             metadata_payload = _write_np_metadata_sidecar(pretend_override=True)
             _print_np_defer_instructions(metadata_payload)
+        _record_benchmark("finalize")
         exit()
 
     # Extract the list of all WCs, as long as we haven't already specified one.
@@ -1737,7 +1775,11 @@ if __name__ == "__main__":
             exec_instance = processor.FuturesExecutor(workers=nworkers)
         _ensure_nonempty_chunks()
         runner = processor.Runner(
-            exec_instance, schema=NanoAODSchema, chunksize=chunksize, maxchunks=nchunks
+            exec_instance,
+            schema=NanoAODSchema,
+            chunksize=chunksize,
+            maxchunks=nchunks,
+            savemetrics=True,
         )
     elif executor_name == "work_queue":
         executor_instance = processor.WorkQueueExecutor(**executor_args)
@@ -1767,7 +1809,10 @@ if __name__ == "__main__":
     run_succeeded = False
     try:
         try:
-            output = runner(flist, treename, processor_instance)
+            with capture_executor_metrics_best_effort(benchmark, executor_name):
+                output = runner(flist, treename, processor_instance)
+            if executor_name == "futures":
+                output, coffea_metrics = output
         except TypeError as exc:
             raise RuntimeError(
                 "The executor returned no chunk results. Ensure that the input files produced at least "
@@ -1793,6 +1838,12 @@ if __name__ == "__main__":
         print("Finished running the processor...")
 
         dt = time.time() - tstart
+        _record_benchmark(
+            "record_runner_runtime",
+            dt,
+            coffea_metrics["entries"] if executor_name == "futures" else None,
+        )
+        _record_benchmark("record_driver_memory", "after_runner")
 
         if executor_name in ["work_queue", "taskvine"]:
             print(
@@ -1814,8 +1865,15 @@ if __name__ == "__main__":
         # Save the output
         os.makedirs(outpath, exist_ok=True)
         print(f"\nSaving output in {out_pkl_file}...")
+        _record_benchmark("record_driver_memory", "before_serialization")
+        t_serialization = time.time()
         with gzip.open(out_pkl_file, "wb") as fout:
             cloudpickle.dump(output, fout)
+
+        serialization_time = time.time() - t_serialization
+        _record_benchmark("record_driver_memory", "after_serialization")
+        _record_benchmark("record_output", out_pkl_file, output)
+        _record_benchmark("record_serialization_time", serialization_time)
         print("Done!")
 
         # Run the data driven estimation, save the output
@@ -1847,5 +1905,9 @@ if __name__ == "__main__":
         else:
             run_succeeded = True
     finally:
-        if run_succeeded and wq_cleanup_after:
-            _cleanup_work_queue_staging_directory(wq_staging_dir, wq_cleanup_after)
+        try:
+            if run_succeeded and wq_cleanup_after:
+                _cleanup_work_queue_staging_directory(wq_staging_dir, wq_cleanup_after)
+        finally:
+            if run_succeeded:
+                _record_benchmark("finalize")
